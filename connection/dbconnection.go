@@ -1,4 +1,4 @@
-package main
+package connection
 
 import (
 	"fmt"
@@ -28,8 +28,4 @@ func Connection() (*gorm.DB, error) {
 
 	fmt.Println("Database connection successful")
 	return db, nil
-}
-
-func main() {
-	Connection()
 }
