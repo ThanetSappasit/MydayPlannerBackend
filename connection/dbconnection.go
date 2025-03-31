@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func Connection() (*gorm.DB, error) {
+func DBConnection() (*gorm.DB, error) {
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
 	err := viper.ReadInConfig()
