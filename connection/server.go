@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"backend/controller"
+	"backend/controller/user" // Removed unused import
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,6 +26,7 @@ func StartServer() {
 	})
 
 	controller.AuthenticateController(router, db, firestoreClient)
+	user.UserController(router, db, firestoreClient)
 
 	router.Run()
 }
