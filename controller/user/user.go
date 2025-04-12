@@ -5,8 +5,11 @@ import (
 	"backend/model"
 	"net/http"
 
+	"time"
+
 	"cloud.google.com/go/firestore"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -18,6 +21,15 @@ func UserController(router *gin.Engine, db *gorm.DB, firestoreClient *firestore.
 		})
 		routes.POST("/getemail", func(c *gin.Context) {
 			GetUserByEmail(c, db, firestoreClient)
+		})
+		routes.POST("/createaccount", func(c *gin.Context) {
+			CreateAccUser(c, db, firestoreClient)
+		})
+		routes.DELETE("/deleteuser", func(c *gin.Context) {
+			DeleteUser(c, db, firestoreClient)
+		})
+		routes.PUT("/updateprofile", func(c *gin.Context) {
+			UpdateProfileUser(c, db, firestoreClient)
 		})
 	}
 }
@@ -57,7 +69,7 @@ func GetUserByEmail(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Clie
 }
 
 func CreateAccUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Client) {
-	var userRequest dto.AccUserRequest
+	var userRequest dto.CreateAccUserRequest
 	if err := c.ShouldBindJSON(&userRequest); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
@@ -68,11 +80,66 @@ func CreateAccUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Clien
 	if result.RowsAffected > 0 {
 		c.JSON(http.StatusConflict, gin.H{"error": "Email already exists"})
 		return
-	} else if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
-		return
 	}
 
+	// Set default values for attributes not provided in the request
+	role := "user"
+	isActive := "1"
+	isVerify := "0"
+	profile := "none-url"
+	createAt := time.Now().UTC()
+
+	var hashedPasswordValue string
+
+	if userRequest.HashedPassword == "" {
+		var sql = `
+			INSERT INTO user (name, email, profile, hashed_password, role, is_active, is_verify, create_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`
+		// ต้องhash - ก่อนไหม ค่อยเอาไปเช็คที่หน้าบ้าน??
+		hashedPasswordValue = "-"
+
+		result := db.Exec(sql,
+			userRequest.Name,
+			userRequest.Email,
+			profile,
+			hashedPasswordValue,
+			role,
+			isActive,
+			isVerify,
+			createAt)
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+			return
+		}
+	} else {
+		hashedPasswordValue, err := bcrypt.GenerateFromPassword([]byte(userRequest.HashedPassword), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+			return
+		}
+		userRequest.HashedPassword = string(hashedPasswordValue)
+
+		var sql = `
+                INSERT INTO user (name, email, hashed_password, profile, role, is_active, is_verify, create_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `
+		result := db.Exec(sql,
+			userRequest.Name,
+			userRequest.Email,
+			hashedPasswordValue,
+			profile,
+			role,
+			isActive,
+			isVerify,
+			createAt)
+
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+			return
+		}
+	}
+	c.JSON(http.StatusCreated, gin.H{"status": "success", "message": "User created successfully"})
 }
 
 func DeleteUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Client) {
@@ -82,12 +149,76 @@ func DeleteUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Client) 
 		return
 	}
 
-	//เช็คอีเมลก่อนว่ามีบอร์ดงานไหมถ้ามีไม่ให้ลบ ถ้าไม่มีลบเลย
-
-	result := db.Delete(&email, email.Email)
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+	const checkSql = `
+        SELECT DISTINCT *
+        FROM user
+        LEFT JOIN board ON user.user_id = board.create_by
+        LEFT JOIN board_user ON user.user_id = board_user.user_id
+        WHERE user.email = ?
+            AND (board.board_id IS NOT NULL OR board_user.board_id IS NOT NULL)
+    `
+	var results []map[string]interface{}
+	if err := db.Raw(checkSql, email.Email).Scan(&results).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user associations"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+
+	//เช็คอีเมลก่อนว่ามีบอร์ดงานไหมถ้ามีไม่ให้ลบ ถ้าไม่มีลบเลย
+	if len(results) > 0 {
+		const updateSql = `
+                UPDATE user
+                SET is_active = "2"
+                WHERE email = ?;`
+		if err := db.Exec(updateSql, email.Email).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to deactivate user"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "User deactivated successfully"})
+	} else {
+		const deleteSql = `
+                DELETE FROM user
+                WHERE email = ?;`
+		if err := db.Exec(deleteSql, email.Email).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+	}
+}
+
+func UpdateProfileUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Client) {
+	var updateProfile dto.UpdateProfileRequest
+	if err := c.ShouldBindJSON(&updateProfile); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	var user model.User
+	result := db.Where("email = ?", updateProfile.Email).First(&user)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+		}
+		return
+	}
+	updates := map[string]interface{}{
+		"name":            updateProfile.ProfileData.Name,
+		"hashed_password": updateProfile.ProfileData.HashedPassword,
+		"profile":         updateProfile.ProfileData.Profile,
+	}
+
+	updateMap := make(map[string]interface{})
+	for key, value := range updates {
+		if value != "" {
+			updateMap[key] = value
+		}
+	}
+
+	if err := db.Model(&user).Updates(updateMap).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user profile"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
 }
