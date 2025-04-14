@@ -3,6 +3,7 @@ package user
 import (
 	"backend/dto"
 	"backend/model"
+	"context"
 	"net/http"
 
 	"time"
@@ -89,6 +90,14 @@ func CreateAccUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Clien
 	profile := "none-url"
 	createAt := time.Now().UTC()
 
+	firebasedata := map[string]interface{}{
+		"email":  userRequest.Email,
+		"active": isActive,
+		"verify": isVerify,
+		"login":  1,
+		"role":   role,
+	}
+
 	var hashedPasswordValue string
 
 	if userRequest.HashedPassword == "" {
@@ -110,6 +119,11 @@ func CreateAccUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Clien
 			createAt)
 		if result.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+			return
+		}
+		_, err := firestoreClient.Collection("usersLogin").Doc(userRequest.Email).Set(context.Background(), firebasedata)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user in Firestore"})
 			return
 		}
 	} else {
@@ -136,6 +150,11 @@ func CreateAccUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Clien
 
 		if result.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+			return
+		}
+		_, err = firestoreClient.Collection("usersLogin").Doc(userRequest.Email).Set(context.Background(), firebasedata)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user in Firestore"})
 			return
 		}
 	}
