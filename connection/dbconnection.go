@@ -2,23 +2,24 @@ package connection
 
 import (
 	"fmt"
+	"os"
 
-	"github.com/spf13/viper"
+	"github.com/joho/godotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
 func DBConnection() (*gorm.DB, error) {
-	viper.SetConfigName("config")
-	viper.AddConfigPath(".")
-	err := viper.ReadInConfig()
+	// โหลด .env
+	err := godotenv.Load()
 	if err != nil {
-		return nil, fmt.Errorf("error reading config file: %w", err)
+		fmt.Println("Warning: No .env file found or failed to load") // ใช้เฉพาะตอน dev
 	}
 
-	dsn := viper.GetString("mysql.dsn")
+	// ดึง DSN จาก ENV
+	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
-		return nil, fmt.Errorf("mysql.dsn is empty")
+		return nil, fmt.Errorf("environment variable DB_DSN is not set")
 	}
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})

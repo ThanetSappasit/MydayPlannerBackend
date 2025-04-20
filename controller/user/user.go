@@ -26,6 +26,9 @@ func UserController(router *gin.Engine, db *gorm.DB, firestoreClient *firestore.
 		routes.POST("/createaccount", func(c *gin.Context) {
 			CreateAccUser(c, db, firestoreClient)
 		})
+		routes.POST("/resetpassword", func(c *gin.Context) {
+			ResetPassword(c, db, firestoreClient)
+		})
 		routes.DELETE("/deleteuser", func(c *gin.Context) {
 			DeleteUser(c, db, firestoreClient)
 		})
@@ -240,4 +243,36 @@ func UpdateProfileUser(c *gin.Context, db *gorm.DB, firestoreClient *firestore.C
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
+}
+
+func ResetPassword(c *gin.Context, db *gorm.DB, firestoreClient *firestore.Client) {
+	var resetPassword dto.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&resetPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	var user model.User
+	result := db.Where("email = ?", resetPassword.Email).First(&user)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+		}
+		return
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(resetPassword.HashedPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
+	if err := db.Model(&user).Update("hashed_password", hashedPassword).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Password reset successfully"})
 }

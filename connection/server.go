@@ -27,6 +27,7 @@ func StartServer() {
 
 	controller.AuthenticateController(router, db, firestoreClient)
 	user.UserController(router, db, firestoreClient)
+	user.UserResetpasswordController(router, db, firestoreClient)
 
 	router.Run()
 }

@@ -22,3 +22,12 @@ type UpdateProfileRequest struct {
 		Profile        string `json:"profile"`
 	} `json:"profileData"`
 }
+
+type EmailOTPRequest struct {
+	Email string `json:"email"`
+}
+
+type ResetPasswordRequest struct {
+	Email          string `json:"email"`
+	HashedPassword string `json:"hashed_password"`
+}
